@@ -17,7 +17,6 @@ class MainActivity : Activity() {
     private data class Spider(var x:Float,var y:Float,var energy:Float,var angle:Float,var speed:Float,val id:Int)
 
     inner class JarView : View(this) {
-        var x:Float,var y:Float,var energy:Float,var angle:Float,var speed:Float,val id:Int)
         private val spiders=mutableListOf<Spider>()
         private val paint=Paint(Paint.ANTI_ALIAS_FLAG)
         private var last=System.nanoTime()
