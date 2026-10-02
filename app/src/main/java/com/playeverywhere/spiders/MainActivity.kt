@@ -4,6 +4,7 @@ import android.app.Activity
 import android.os.Bundle
 import android.view.View
 import android.graphics.*
+import android.widget.*
 import kotlin.math.*
 import kotlin.random.Random
 
@@ -12,7 +13,55 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         window.decorView.systemUiVisibility =
             View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-        setContentView(JarView())
+        val root = FrameLayout(this)
+        val game = JarView()
+        root.addView(game)
+
+        val settings = Button(this).apply {
+            text = "⚙ Пауки: 18"
+            setTextColor(Color.WHITE)
+            setBackgroundColor(Color.argb(180, 35, 35, 35))
+            setOnClickListener { showSpiderSettings(game, this) }
+        }
+        val lp = FrameLayout.LayoutParams(210, 64)
+        lp.gravity = android.view.Gravity.TOP or android.view.Gravity.END
+        lp.setMargins(0, 18, 18, 0)
+        root.addView(settings, lp)
+        setContentView(root)
+    }
+
+    private fun showSpiderSettings(game: JarView, button: Button) {
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(40, 20, 40, 10)
+        }
+        val label = TextView(this)
+        label.text = "Количество пауков: " + game.spiderCount
+        label.textSize = 20f
+        val seek = SeekBar(this).apply {
+            max = 97
+            progress = game.spiderCount.coerceIn(3, 100) - 3
+        }
+        seek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(b: SeekBar, p: Int, fromUser: Boolean) {
+                label.text = "Количество пауков: " + (p + 3)
+            }
+            override fun onStartTrackingTouch(b: SeekBar) {}
+            override fun onStopTrackingTouch(b: SeekBar) {}
+        })
+        layout.addView(label)
+        layout.addView(seek)
+
+        AlertDialog.Builder(this)
+            .setTitle("Настройки симуляции")
+            .setView(layout)
+            .setNegativeButton("Отмена", null)
+            .setPositiveButton("Применить") { _, _ ->
+                val count = seek.progress + 3
+                game.setSpiderCount(count)
+                button.text = "⚙ Пауки: " + count
+            }
+            .show()
     }
 
     private enum class Tactic { ATTACK, DEFEND, FLEE }
@@ -30,6 +79,17 @@ class MainActivity : Activity() {
         private var last = System.nanoTime()
         private var paused = false
         private var nextId = 1
+        var spiderCount = 18
+            private set
+
+        fun setSpiderCount(count: Int) {
+            spiderCount = count.coerceIn(3, 100)
+            while (spiders.size < spiderCount) addSpider()
+            if (spiders.size > spiderCount) {
+                spiders.subList(spiderCount, spiders.size).clear()
+            }
+            invalidate()
+        }
 
         init {
             repeat(18) { addSpider() }
@@ -163,7 +223,7 @@ class MainActivity : Activity() {
             }
 
             spiders.removeAll(dead.toSet())
-            while (spiders.size < 8) addSpider()
+            while (spiders.size < spiderCount) addSpider()
         }
 
         private fun speciesColor(s: Species): Int = when (s) {
