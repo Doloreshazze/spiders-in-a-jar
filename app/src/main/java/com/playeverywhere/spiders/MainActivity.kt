@@ -16,10 +16,12 @@ class MainActivity : Activity() {
     }
 
     private enum class Tactic { ATTACK, DEFEND, FLEE }
+    private enum class Species { ROCK, SCISSORS, PAPER }
 
     private data class Spider(
         var x: Float, var y: Float, var energy: Float, var angle: Float,
-        var speed: Float, val id: Int, var tactic: Tactic = Tactic.DEFEND
+        var speed: Float, val id: Int, val species: Species,
+        var tactic: Tactic = Tactic.DEFEND
     )
 
     inner class JarView : View(this) {
@@ -35,15 +37,25 @@ class MainActivity : Activity() {
         }
 
         private fun addSpider() {
+            val species = when (nextId % 3) {
+                1 -> Species.ROCK
+                2 -> Species.SCISSORS
+                else -> Species.PAPER
+            }
             spiders += Spider(
                 Random.nextFloat() * max(width.toFloat(), 900f),
                 Random.nextFloat() * max(height.toFloat(), 1500f),
                 45f + Random.nextFloat() * 55f,
                 Random.nextFloat() * 6.28f,
                 35f + Random.nextFloat() * 45f,
-                nextId++
+                nextId++, species
             )
         }
+
+        private fun beats(a: Species, b: Species): Boolean =
+            (a == Species.ROCK && b == Species.SCISSORS) ||
+            (a == Species.SCISSORS && b == Species.PAPER) ||
+            (a == Species.PAPER && b == Species.ROCK)
 
         override fun onDraw(c: Canvas) {
             val now = System.nanoTime()
@@ -70,7 +82,6 @@ class MainActivity : Activity() {
 
             for (s in spiders) {
                 s.energy -= dt * 2.0f
-
                 var prey: Spider? = null
                 var preyDist = Float.MAX_VALUE
                 var threat: Spider? = null
@@ -78,50 +89,49 @@ class MainActivity : Activity() {
 
                 for (o in spiders) {
                     if (o === s || o.energy <= 0f) continue
-                    val dx = o.x - s.x
-                    val dy = o.y - s.y
-                    val d = hypot(dx, dy)
-                    if (d < preyDist && o.energy < s.energy * 1.15f) {
+                    val d = hypot(o.x - s.x, o.y - s.y)
+                    if (d < preyDist && beats(s.species, o.species) &&
+                        o.energy < s.energy * 1.20f) {
                         preyDist = d
                         prey = o
                     }
-                    if (d < threatDist && o.energy > s.energy * 0.75f) {
+                    if (d < threatDist && beats(o.species, s.species) &&
+                        o.energy > s.energy * 0.75f) {
                         threatDist = d
                         threat = o
                     }
                 }
 
-                // Decide by situation: flee from a stronger nearby enemy,
-                // defend when threatened, otherwise attack suitable prey.
-                if (threat != null && threatDist < 150f && s.energy < threat!!.energy * 0.9f) {
-                    s.tactic = Tactic.FLEE
-                    s.angle = atan2(s.y - threat!!.y, s.x - threat!!.x)
-                } else if (threat != null && threatDist < 180f) {
-                    val toThreat = atan2(threat!!.y - s.y, threat!!.x - s.x)
-                    val threatFromBehind = angleDiff(toThreat, s.angle) > Math.toRadians(105.0)
-                    s.tactic = Tactic.DEFEND
-                    if (threatFromBehind || Random.nextFloat() < dt * 2.5f) s.angle = toThreat
-                } else if (prey != null && preyDist < 260f) {
+                if (threat != null && threatDist < 175f) {
+                    if (s.energy < threat!!.energy * 1.05f || threatDist < 95f) {
+                        s.tactic = Tactic.FLEE
+                        s.angle = atan2(s.y - threat!!.y, s.x - threat!!.x)
+                    } else {
+                        s.tactic = Tactic.DEFEND
+                        val toThreat = atan2(threat!!.y - s.y, threat!!.x - s.x)
+                        if (angleDiff(toThreat, s.angle) > Math.toRadians(105.0) ||
+                            Random.nextFloat() < dt * 2.5f) s.angle = toThreat
+                    }
+                } else if (prey != null && preyDist < 280f) {
                     val toPrey = atan2(prey!!.y - s.y, prey!!.x - s.x)
-                    if (angleDiff(toPrey, s.angle) < Math.toRadians(80.0)) {
+                    if (angleDiff(toPrey, s.angle) < Math.toRadians(95.0)) {
                         s.tactic = Tactic.ATTACK
                         s.angle = toPrey
                     } else {
                         s.tactic = Tactic.DEFEND
-                        s.angle += dt * 2.8f
+                        s.angle += dt * 3.0f
                     }
                 } else {
                     s.tactic = Tactic.DEFEND
                     if (Random.nextFloat() < dt * .8f)
-                        s.angle += (Random.nextFloat() - .5f) * 1.4f
+                        s.angle += (Random.nextFloat() - .5f) * 1.8f
                 }
 
                 val moveSpeed = when (s.tactic) {
-                    Tactic.ATTACK -> s.speed * 1.15f
+                    Tactic.ATTACK -> s.speed * 1.20f
                     Tactic.DEFEND -> s.speed * .72f
-                    Tactic.FLEE -> s.speed * 1.65f
+                    Tactic.FLEE -> s.speed * 1.75f
                 }
-
                 s.x += cos(s.angle) * moveSpeed * dt
                 s.y += sin(s.angle) * moveSpeed * dt
 
@@ -131,9 +141,8 @@ class MainActivity : Activity() {
                 if (s.y < p) { s.y = p; s.angle = -s.angle }
                 if (s.y > h - p) { s.y = h - p; s.angle = -s.angle }
 
-                // Attacks only work through the attacker's front arc.
-                // A hit from the rear is much more damaging because the rear is vulnerable.
-                if (prey != null && preyDist < 34f && s.tactic == Tactic.ATTACK && prey!!.energy > 0f) {
+                if (prey != null && preyDist < 34f && s.tactic == Tactic.ATTACK &&
+                    prey!!.energy > 0f) {
                     val toPrey = atan2(prey!!.y - s.y, prey!!.x - s.x)
                     if (angleDiff(toPrey, s.angle) < Math.toRadians(75.0)) {
                         val preyFacingUs = atan2(s.y - prey!!.y, s.x - prey!!.x)
@@ -144,18 +153,23 @@ class MainActivity : Activity() {
                     }
                 }
 
-                // Defensive posture reduces damage when facing the attacker.
-                if (threat != null && threatDist < 38f && threat!!.tactic == Tactic.ATTACK && s.energy > 0f) {
+                if (threat != null && threatDist < 38f &&
+                    threat!!.tactic == Tactic.ATTACK && s.energy > 0f) {
                     val attackerToUs = atan2(s.y - threat!!.y, s.x - threat!!.x)
                     val facingAttacker = angleDiff(attackerToUs, s.angle) < Math.toRadians(80.0)
                     if (facingAttacker) s.energy -= dt * 10f
                 }
-
                 if (s.energy <= 0f) dead += s
             }
 
             spiders.removeAll(dead.toSet())
             while (spiders.size < 8) addSpider()
+        }
+
+        private fun speciesColor(s: Species): Int = when (s) {
+            Species.ROCK -> Color.rgb(155, 155, 165)
+            Species.SCISSORS -> Color.rgb(235, 95, 105)
+            Species.PAPER -> Color.rgb(95, 175, 225)
         }
 
         private fun drawJar(c: Canvas) {
@@ -171,14 +185,15 @@ class MainActivity : Activity() {
         private fun drawSpider(c: Canvas, s: Spider) {
             val r = 7f + min(9f, s.energy / 15f)
             paint.style = Paint.Style.FILL
-            paint.color = when (s.tactic) {
-                Tactic.ATTACK -> Color.rgb(225, 105, 75)
-                Tactic.DEFEND -> Color.rgb(120, 170, 205)
-                Tactic.FLEE -> Color.rgb(220, 195, 75)
-            }
+            paint.color = speciesColor(s.species)
             c.drawCircle(s.x, s.y, r, paint)
+            paint.color = when (s.tactic) {
+                Tactic.ATTACK -> Color.rgb(245, 75, 55)
+                Tactic.DEFEND -> Color.rgb(80, 110, 125)
+                Tactic.FLEE -> Color.rgb(245, 215, 65)
+            }
+            c.drawCircle(s.x, s.y, r * .30f, paint)
 
-            // Eyes mark the front, so the vulnerable rear is visible.
             val eyeX = cos(s.angle) * r * .55f
             val eyeY = sin(s.angle) * r * .55f
             paint.color = Color.WHITE
@@ -205,11 +220,12 @@ class MainActivity : Activity() {
             paint.textSize = 42f
             paint.typeface = Typeface.DEFAULT_BOLD
             c.drawText("ПАУКИ В БАНКЕ", 38f, 65f, paint)
-            paint.textSize = 27f
+            paint.textSize = 25f
             paint.typeface = Typeface.DEFAULT
             c.drawText("Живых: " + spiders.size, 38f, 103f, paint)
-            paint.textSize = 21f
-            c.drawText("Красный: атака   Синий: оборона   Жёлтый: бегство", 38f, 136f, paint)
+            paint.textSize = 19f
+            c.drawText("Камень > Ножницы   Ножницы > Бумага   Бумага > Камень", 38f, 136f, paint)
+            c.drawText("Серый: К   Красный: Н   Синий: Б   Точка = тактика", 38f, 162f, paint)
             c.drawText(if (paused) "ПАУЗА — нажми экран" else "Нажми экран: пауза",
                 38f, height - 35f, paint)
         }
