@@ -44,7 +44,7 @@ class MainActivity : Activity() {
             FrameLayout.LayoutParams.MATCH_PARENT, 72
         )
         mlp.gravity = android.view.Gravity.BOTTOM
-        mlp.setMargins(24, 0, 24, 58)
+        mlp.setMargins(24, 0, 24, 105)
         root.addView(modeButton, mlp)
         setContentView(root)
     }
@@ -92,6 +92,7 @@ class MainActivity : Activity() {
         var gene: Float = Random.nextFloat(),
         var age: Float = 0f,
         var kills: Int = 0,
+        var lineage: Int = 1,
         var tactic: Tactic = Tactic.DEFEND
     )
 
@@ -105,10 +106,9 @@ class MainActivity : Activity() {
             private set
         var evolutionMode = false
         private var generation = 1
-        private var generationTimer = 0f
-        private val generationLength = 14f
         private var bestGene = 0.5f
         private var bestFitness = 0f
+        private var births = 0
 
         fun setSpiderCount(count: Int) {
             spiderCount = count.coerceIn(3, 100)
@@ -119,9 +119,9 @@ class MainActivity : Activity() {
             spiders.clear()
             nextId = 1
             generation = 1
-            generationTimer = 0f
             bestGene = 0.5f
             bestFitness = 0f
+            births = 0
             repeat(spiderCount) { addSpider() }
             invalidate()
         }
@@ -282,11 +282,16 @@ class MainActivity : Activity() {
         private fun updateEvolution(dt: Float) {
             val w = width.toFloat()
             val h = height.toFloat()
-            generationTimer += dt
+
+            // Evolution is now an emergent consequence of the game itself:
+            // hunger, hunting, fleeing, death and reproduction determine which
+            // genomes leave descendants. There is no timed "selection" event.
+            val crowding = max(0f, (spiders.size - spiderCount).toFloat() / spiderCount)
 
             for (s in spiders) {
                 s.age += dt
-                s.energy -= dt * metabolism(s)
+                s.energy -= dt * metabolism(s) * (1f + crowding * 0.65f)
+
                 var nearest: Spider? = null
                 var nearestDist = Float.MAX_VALUE
                 var weakest: Spider? = null
@@ -314,7 +319,8 @@ class MainActivity : Activity() {
                     val toward = atan2(n.y - s.y, n.x - s.x)
                     if (n.energy < s.energy * (0.65f + ag * .45f) && ag > ca) {
                         s.tactic = Tactic.ATTACK
-                        s.angle += angleDelta(toward - s.angle) * min(1f, dt * (2.5f + mobility(s)))
+                        s.angle += angleDelta(toward - s.angle) *
+                            min(1f, dt * (2.5f + mobility(s)))
                     } else if (n.energy > s.energy * (1.0f + ca * .35f)) {
                         s.tactic = Tactic.FLEE
                         s.angle = atan2(s.y - n.y, s.x - n.x)
@@ -329,8 +335,9 @@ class MainActivity : Activity() {
                     }
                 }
 
-                if (weakest != null && weakestDist < 38f && s.tactic == Tactic.ATTACK &&
-                    weakest!!.energy > 0f) {
+                // Successful hunting transfers energy from prey to hunter.
+                if (weakest != null && weakestDist < 38f &&
+                    s.tactic == Tactic.ATTACK && weakest!!.energy > 0f) {
                     val damage = (18f + 24f * ag) * dt
                     weakest!!.energy -= damage
                     s.energy = min(120f, s.energy + damage * .48f)
@@ -350,13 +357,30 @@ class MainActivity : Activity() {
                 if (s.x > w - p) { s.x = w - p; s.angle = PI.toFloat() - s.angle }
                 if (s.y < p) { s.y = p; s.angle = -s.angle }
                 if (s.y > h - p) { s.y = h - p; s.angle = -s.angle }
+
+                // Reproduction costs real energy. Only spiders that have
+                // survived and accumulated enough energy can reproduce.
+                // Their child inherits the genome with a small mutation.
+                if (s.age > 4f && s.energy > 92f &&
+                    spiders.size < spiderCount * 2 &&
+                    Random.nextFloat() < dt * (0.045f + ag * 0.035f)) {
+                    s.energy -= 46f
+                    addEvolutionChild(s)
+                    births++
+                }
             }
 
-            // Every generation, the fittest survive and reproduce.
-            if (generationTimer >= generationLength) evolveGeneration()
-
+            // Death is entirely caused by the simulation mechanics.
             spiders.removeAll { it.energy <= 0f }
-            while (spiders.size < spiderCount) addEvolutionChild()
+
+            // Track the naturally achieved best fitness, not a forced ranking.
+            spiders.maxByOrNull { fitness(it) }?.let { best ->
+                if (fitness(best) > bestFitness) {
+                    bestFitness = fitness(best)
+                    bestGene = best.gene
+                }
+                generation = max(generation, best.lineage)
+            }
         }
 
         private fun angleDelta(a: Float): Float {
@@ -369,46 +393,20 @@ class MainActivity : Activity() {
             return s.energy + s.kills * 48f + min(35f, s.age * 1.2f)
         }
 
-        private fun evolveGeneration() {
-            if (spiders.isEmpty()) return
-            val ranked = spiders.sortedByDescending { fitness(it) }
-            val eliteCount = max(2, (ranked.size * .28f).toInt())
-            val elites = ranked.take(min(eliteCount, ranked.size))
-            bestFitness = fitness(elites.first())
-            bestGene = elites.first().gene
-            val survivors = elites.toMutableList()
-
-            // Replace the weaker part of the population with mutated descendants.
-            val target = spiderCount
-            spiders.clear()
-            spiders.addAll(survivors.map { parent ->
-                parent.copy(
-                    x = Random.nextFloat() * max(width.toFloat() - 84f, 100f) + 42f,
-                    y = Random.nextFloat() * max(height.toFloat() - 84f, 100f) + 42f,
-                    energy = 65f + Random.nextFloat() * 35f,
-                    age = 0f,
-                    kills = 0
-                )
-            })
-            while (spiders.size < target) addEvolutionChild()
-            generation++
-            generationTimer = 0f
-        }
-
-        private fun addEvolutionChild() {
-            val parent = spiders
-                .filter { it.energy > 0f }
-                .maxByOrNull { fitness(it) }
-                ?: return addSpider()
-            val mutation = (Random.nextFloat() - .5f) * .16f
+        // Child production is local and continuous: no generation-wide cull.
+        private fun addEvolutionChild(parent: Spider) {
+            val mutation = (Random.nextFloat() - .5f) * .10f
             val childGene = (parent.gene + mutation).coerceIn(0f, 1f)
             val child = Spider(
                 Random.nextFloat() * max(width.toFloat() - 84f, 100f) + 42f,
                 Random.nextFloat() * max(height.toFloat() - 84f, 100f) + 42f,
-                65f + Random.nextFloat() * 35f,
+                42f + Random.nextFloat() * 12f,
                 Random.nextFloat() * 6.28f,
-                35f + Random.nextFloat() * 45f,
-                nextId++, Species.ROCK, childGene
+                (parent.speed + (Random.nextFloat() - .5f) * 8f).coerceIn(25f, 85f),
+                nextId++, Species.ROCK, childGene,
+                age = 0f,
+                kills = 0,
+                lineage = parent.lineage + 1
             )
             spiders += child
         }
@@ -487,11 +485,11 @@ class MainActivity : Activity() {
             c.drawText("Живых: " + spiders.size, 38f, 103f, paint)
             paint.textSize = 19f
             if (evolutionMode) {
-                c.drawText("🧬 ПОКОЛЕНИЕ: $generation    До отбора: " +
-                    max(0, (generationLength - generationTimer).toInt()) + "с", 38f, 136f, paint)
+                c.drawText("🧬 ПОКОЛЕНИЕ: $generation    Рождений: $births", 38f, 136f, paint)
                 c.drawText("Лучший ген: %.3f   Приспособленность: %.0f".format(bestGene, bestFitness),
                     38f, 162f, paint)
-                c.drawText("Дуга вокруг паука = его геном. Точка = тактика.", 38f, 188f, paint)
+                c.drawText("Отбор естественный: выживание → энергия → потомство → мутация.", 38f, 188f, paint)
+                c.drawText("Дуга = геном. Точка = тактика.", 38f, 214f, paint)
             } else {
                 c.drawText("Камень > Ножницы   Ножницы > Бумага   Бумага > Камень", 38f, 136f, paint)
                 c.drawText("Серый: К   Красный: Н   Синий: Б   Точка = тактика", 38f, 162f, paint)
