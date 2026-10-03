@@ -30,18 +30,21 @@ class MainActivity : Activity() {
         root.addView(settings, lp)
 
         val modeButton = Button(this).apply {
-            text = "🧬 Эволюция"
+            text = "РЕЖИМ: RPS"
+            textSize = 16f
             setTextColor(Color.WHITE)
-            setBackgroundColor(Color.argb(180, 35, 35, 35))
+            setBackgroundColor(Color.argb(220, 35, 35, 35))
             setOnClickListener {
                 game.evolutionMode = !game.evolutionMode
-                text = if (game.evolutionMode) "🧬 Эволюция" else "⚔ RPS"
+                text = if (game.evolutionMode) "РЕЖИМ: ЭВОЛЮЦИЯ" else "РЕЖИМ: RPS"
                 game.resetPopulation()
             }
         }
-        val mlp = FrameLayout.LayoutParams(210, 64)
-        mlp.gravity = android.view.Gravity.TOP or android.view.Gravity.END
-        mlp.setMargins(0, 92, 18, 0)
+        val mlp = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT, 72
+        )
+        mlp.gravity = android.view.Gravity.BOTTOM
+        mlp.setMargins(24, 0, 24, 58)
         root.addView(modeButton, mlp)
         setContentView(root)
     }
