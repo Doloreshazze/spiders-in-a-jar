@@ -22,7 +22,7 @@ class MainActivity : Activity() {
             text = "⚙ Пауки: 18"
             setTextColor(Color.WHITE)
             setBackgroundColor(Color.argb(180, 35, 35, 35))
-            setOnClickListener { showSpiderSettings(game, this, modeButton) }
+            setOnClickListener { showSpiderSettings(game, this) }
         }
         val lp = FrameLayout.LayoutParams(210, 64)
         lp.gravity = android.view.Gravity.TOP or android.view.Gravity.END
@@ -46,7 +46,7 @@ class MainActivity : Activity() {
         setContentView(root)
     }
 
-    private fun showSpiderSettings(game: JarView, button: Button, modeButton: Button) {
+    private fun showSpiderSettings(game: JarView, button: Button) {
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(40, 20, 40, 10)
