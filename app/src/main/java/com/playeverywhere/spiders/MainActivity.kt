@@ -289,6 +289,7 @@ class MainActivity : Activity() {
             // hunger, hunting, fleeing, death and reproduction determine which
             // genomes leave descendants. There is no timed "selection" event.
             val crowding = max(0f, (spiders.size - spiderCount).toFloat() / spiderCount)
+            val reproductionQueue = mutableListOf<Spider>()
 
             for (s in spiders) {
                 s.age += dt
