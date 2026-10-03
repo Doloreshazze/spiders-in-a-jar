@@ -1,6 +1,7 @@
 package com.playeverywhere.spiders
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.os.Bundle
 import android.view.View
 import android.graphics.*
@@ -21,16 +22,31 @@ class MainActivity : Activity() {
             text = "⚙ Пауки: 18"
             setTextColor(Color.WHITE)
             setBackgroundColor(Color.argb(180, 35, 35, 35))
-            setOnClickListener { showSpiderSettings(game, this) }
+            setOnClickListener { showSpiderSettings(game, this, modeButton) }
         }
         val lp = FrameLayout.LayoutParams(210, 64)
         lp.gravity = android.view.Gravity.TOP or android.view.Gravity.END
         lp.setMargins(0, 18, 18, 0)
         root.addView(settings, lp)
+
+        val modeButton = Button(this).apply {
+            text = "🧬 Эволюция"
+            setTextColor(Color.WHITE)
+            setBackgroundColor(Color.argb(180, 35, 35, 35))
+            setOnClickListener {
+                game.evolutionMode = !game.evolutionMode
+                text = if (game.evolutionMode) "🧬 Эволюция" else "⚔ RPS"
+                game.resetPopulation()
+            }
+        }
+        val mlp = FrameLayout.LayoutParams(210, 64)
+        mlp.gravity = android.view.Gravity.TOP or android.view.Gravity.END
+        mlp.setMargins(0, 92, 18, 0)
+        root.addView(modeButton, mlp)
         setContentView(root)
     }
 
-    private fun showSpiderSettings(game: JarView, button: Button) {
+    private fun showSpiderSettings(game: JarView, button: Button, modeButton: Button) {
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(40, 20, 40, 10)
@@ -70,6 +86,9 @@ class MainActivity : Activity() {
     private data class Spider(
         var x: Float, var y: Float, var energy: Float, var angle: Float,
         var speed: Float, val id: Int, val species: Species,
+        var gene: Float = Random.nextFloat(),
+        var age: Float = 0f,
+        var kills: Int = 0,
         var tactic: Tactic = Tactic.DEFEND
     )
 
@@ -81,18 +100,31 @@ class MainActivity : Activity() {
         private var nextId = 1
         var spiderCount = 18
             private set
+        var evolutionMode = false
+        private var generation = 1
+        private var generationTimer = 0f
+        private val generationLength = 14f
+        private var bestGene = 0.5f
+        private var bestFitness = 0f
 
         fun setSpiderCount(count: Int) {
             spiderCount = count.coerceIn(3, 100)
-            while (spiders.size < spiderCount) addSpider()
-            if (spiders.size > spiderCount) {
-                spiders.subList(spiderCount, spiders.size).clear()
-            }
+            resetPopulation()
+        }
+
+        fun resetPopulation() {
+            spiders.clear()
+            nextId = 1
+            generation = 1
+            generationTimer = 0f
+            bestGene = 0.5f
+            bestFitness = 0f
+            repeat(spiderCount) { addSpider() }
             invalidate()
         }
 
         init {
-            repeat(18) { addSpider() }
+            repeat(spiderCount) { addSpider() }
             setOnClickListener { paused = !paused; invalidate() }
         }
 
@@ -108,7 +140,7 @@ class MainActivity : Activity() {
                 45f + Random.nextFloat() * 55f,
                 Random.nextFloat() * 6.28f,
                 35f + Random.nextFloat() * 45f,
-                nextId++, species
+                nextId++, species, Random.nextFloat()
             )
         }
 
@@ -136,6 +168,10 @@ class MainActivity : Activity() {
         }
 
         private fun update(dt: Float) {
+            if (evolutionMode) {
+                updateEvolution(dt)
+                return
+            }
             val w = width.toFloat()
             val h = height.toFloat()
             val dead = mutableListOf<Spider>()
@@ -226,6 +262,154 @@ class MainActivity : Activity() {
             while (spiders.size < spiderCount) addSpider()
         }
 
+
+        // One number is the spider's genome. It is decoded into several
+        // behavioral traits, so natural selection can tune a single gene.
+        private fun trait(gene: Float, salt: Int): Float {
+            val x = sin((gene * 997.0 + salt * 83.17).toDouble()) * 43758.5453
+            return (x - floor(x)).toFloat()
+        }
+
+        private fun aggression(s: Spider) = 0.25f + trait(s.gene, 1) * 1.15f
+        private fun caution(s: Spider) = 0.15f + trait(s.gene, 2) * 1.10f
+        private fun perception(s: Spider) = 90f + trait(s.gene, 3) * 240f
+        private fun mobility(s: Spider) = 0.55f + trait(s.gene, 4) * 1.55f
+        private fun metabolism(s: Spider) = 1.25f + trait(s.gene, 5) * 1.55f
+
+        private fun updateEvolution(dt: Float) {
+            val w = width.toFloat()
+            val h = height.toFloat()
+            generationTimer += dt
+
+            for (s in spiders) {
+                s.age += dt
+                s.energy -= dt * metabolism(s)
+                var nearest: Spider? = null
+                var nearestDist = Float.MAX_VALUE
+                var weakest: Spider? = null
+                var weakestDist = Float.MAX_VALUE
+
+                for (o in spiders) {
+                    if (o === s || o.energy <= 0f) continue
+                    val d = hypot(o.x - s.x, o.y - s.y)
+                    if (d < nearestDist) {
+                        nearestDist = d
+                        nearest = o
+                    }
+                    if (o.energy < s.energy && d < weakestDist) {
+                        weakestDist = d
+                        weakest = o
+                    }
+                }
+
+                val ag = aggression(s)
+                val ca = caution(s)
+                val range = perception(s)
+
+                if (nearest != null && nearestDist < range) {
+                    val n = nearest!!
+                    val toward = atan2(n.y - s.y, n.x - s.x)
+                    if (n.energy < s.energy * (0.65f + ag * .45f) && ag > ca) {
+                        s.tactic = Tactic.ATTACK
+                        s.angle += angleDelta(toward - s.angle) * min(1f, dt * (2.5f + mobility(s)))
+                    } else if (n.energy > s.energy * (1.0f + ca * .35f)) {
+                        s.tactic = Tactic.FLEE
+                        s.angle = atan2(s.y - n.y, s.x - n.x)
+                    } else {
+                        s.tactic = Tactic.DEFEND
+                        s.angle += dt * (if (ag > .8f) 1.8f else -1.2f)
+                    }
+                } else {
+                    s.tactic = Tactic.DEFEND
+                    if (Random.nextFloat() < dt * (0.35f + mobility(s) * .3f)) {
+                        s.angle += (Random.nextFloat() - .5f) * 2.5f
+                    }
+                }
+
+                if (weakest != null && weakestDist < 38f && s.tactic == Tactic.ATTACK &&
+                    weakest!!.energy > 0f) {
+                    val damage = (18f + 24f * ag) * dt
+                    weakest!!.energy -= damage
+                    s.energy = min(120f, s.energy + damage * .48f)
+                    if (weakest!!.energy <= 0f) s.kills++
+                }
+
+                val speed = s.speed * mobility(s) * when (s.tactic) {
+                    Tactic.ATTACK -> 1.35f
+                    Tactic.DEFEND -> .72f
+                    Tactic.FLEE -> 1.85f
+                }
+                s.x += cos(s.angle) * speed * dt
+                s.y += sin(s.angle) * speed * dt
+
+                val p = 42f
+                if (s.x < p) { s.x = p; s.angle = PI.toFloat() - s.angle }
+                if (s.x > w - p) { s.x = w - p; s.angle = PI.toFloat() - s.angle }
+                if (s.y < p) { s.y = p; s.angle = -s.angle }
+                if (s.y > h - p) { s.y = h - p; s.angle = -s.angle }
+            }
+
+            // Every generation, the fittest survive and reproduce.
+            if (generationTimer >= generationLength) evolveGeneration()
+
+            spiders.removeAll { it.energy <= 0f }
+            while (spiders.size < spiderCount) addEvolutionChild()
+        }
+
+        private fun angleDelta(a: Float): Float {
+            var d = (a + PI.toFloat()) % (2f * PI.toFloat()) - PI.toFloat()
+            if (d < -PI) d += 2f * PI.toFloat()
+            return d
+        }
+
+        private fun fitness(s: Spider): Float {
+            return s.energy + s.kills * 48f + min(35f, s.age * 1.2f)
+        }
+
+        private fun evolveGeneration() {
+            if (spiders.isEmpty()) return
+            val ranked = spiders.sortedByDescending { fitness(it) }
+            val eliteCount = max(2, (ranked.size * .28f).toInt())
+            val elites = ranked.take(min(eliteCount, ranked.size))
+            bestFitness = fitness(elites.first())
+            bestGene = elites.first().gene
+            val survivors = elites.toMutableList()
+
+            // Replace the weaker part of the population with mutated descendants.
+            val target = spiderCount
+            spiders.clear()
+            spiders.addAll(survivors.map { parent ->
+                parent.copy(
+                    x = Random.nextFloat() * max(width.toFloat() - 84f, 100f) + 42f,
+                    y = Random.nextFloat() * max(height.toFloat() - 84f, 100f) + 42f,
+                    energy = 65f + Random.nextFloat() * 35f,
+                    age = 0f,
+                    kills = 0
+                )
+            })
+            while (spiders.size < target) addEvolutionChild()
+            generation++
+            generationTimer = 0f
+        }
+
+        private fun addEvolutionChild() {
+            val parent = spiders
+                .filter { it.energy > 0f }
+                .maxByOrNull { fitness(it) }
+                ?: return addSpider()
+            val mutation = (Random.nextFloat() - .5f) * .16f
+            val childGene = (parent.gene + mutation).coerceIn(0f, 1f)
+            val child = Spider(
+                Random.nextFloat() * max(width.toFloat() - 84f, 100f) + 42f,
+                Random.nextFloat() * max(height.toFloat() - 84f, 100f) + 42f,
+                65f + Random.nextFloat() * 35f,
+                Random.nextFloat() * 6.28f,
+                35f + Random.nextFloat() * 45f,
+                nextId++, Species.ROCK, childGene
+            )
+            spiders += child
+        }
+
         private fun speciesColor(s: Species): Int = when (s) {
             Species.ROCK -> Color.rgb(155, 155, 165)
             Species.SCISSORS -> Color.rgb(235, 95, 105)
@@ -245,7 +429,14 @@ class MainActivity : Activity() {
         private fun drawSpider(c: Canvas, s: Spider) {
             val r = 7f + min(9f, s.energy / 15f)
             paint.style = Paint.Style.FILL
-            paint.color = speciesColor(s.species)
+            paint.color = if (evolutionMode) {
+                val g = s.gene
+                Color.rgb(
+                    (70 + 170 * trait(g, 10)).toInt(),
+                    (80 + 150 * trait(g, 11)).toInt(),
+                    (90 + 150 * trait(g, 12)).toInt()
+                )
+            } else speciesColor(s.species)
             c.drawCircle(s.x, s.y, r, paint)
             paint.color = when (s.tactic) {
                 Tactic.ATTACK -> Color.rgb(245, 75, 55)
@@ -253,6 +444,14 @@ class MainActivity : Activity() {
                 Tactic.FLEE -> Color.rgb(245, 215, 65)
             }
             c.drawCircle(s.x, s.y, r * .30f, paint)
+            if (evolutionMode) {
+                paint.style = Paint.Style.STROKE
+                paint.strokeWidth = 2.5f
+                paint.color = Color.argb(180, 255, 255, 255)
+                c.drawArc(s.x - r - 3f, s.y - r - 3f, s.x + r + 3f, s.y + r + 3f,
+                    -90f, 360f * s.gene, false, paint)
+                paint.style = Paint.Style.FILL
+            }
 
             val eyeX = cos(s.angle) * r * .55f
             val eyeY = sin(s.angle) * r * .55f
@@ -284,8 +483,16 @@ class MainActivity : Activity() {
             paint.typeface = Typeface.DEFAULT
             c.drawText("Живых: " + spiders.size, 38f, 103f, paint)
             paint.textSize = 19f
-            c.drawText("Камень > Ножницы   Ножницы > Бумага   Бумага > Камень", 38f, 136f, paint)
-            c.drawText("Серый: К   Красный: Н   Синий: Б   Точка = тактика", 38f, 162f, paint)
+            if (evolutionMode) {
+                c.drawText("🧬 ПОКОЛЕНИЕ: $generation    До отбора: " +
+                    max(0, (generationLength - generationTimer).toInt()) + "с", 38f, 136f, paint)
+                c.drawText("Лучший ген: %.3f   Приспособленность: %.0f".format(bestGene, bestFitness),
+                    38f, 162f, paint)
+                c.drawText("Дуга вокруг паука = его геном. Точка = тактика.", 38f, 188f, paint)
+            } else {
+                c.drawText("Камень > Ножницы   Ножницы > Бумага   Бумага > Камень", 38f, 136f, paint)
+                c.drawText("Серый: К   Красный: Н   Синий: Б   Точка = тактика", 38f, 162f, paint)
+            }
             c.drawText(if (paused) "ПАУЗА — нажми экран" else "Нажми экран: пауза",
                 38f, height - 35f, paint)
         }
