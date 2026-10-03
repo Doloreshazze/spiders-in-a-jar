@@ -179,6 +179,8 @@ class MainActivity : Activity() {
             val h = height.toFloat()
             val dead = mutableListOf<Spider>()
 
+            val reproductionQueue = mutableListOf<Spider>()
+
             for (s in spiders) {
                 s.energy -= dt * 2.0f
                 var prey: Spider? = null
@@ -365,10 +367,14 @@ class MainActivity : Activity() {
                     spiders.size < spiderCount * 2 &&
                     Random.nextFloat() < dt * (0.045f + ag * 0.035f)) {
                     s.energy -= 46f
-                    addEvolutionChild(s)
+                    reproductionQueue += s
                     births++
                 }
             }
+
+            // Add offspring only after iteration is complete. This avoids modifying
+            // the ArrayList while its iterator is active.
+            reproductionQueue.forEach { parent -> addEvolutionChild(parent) }
 
             // Death is entirely caused by the simulation mechanics.
             spiders.removeAll { it.energy <= 0f }
